@@ -1,0 +1,12 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+_build_log*.txt
+_lint_log*.txt
+_bump*.py
+_patch*.py
+keystore.properties
+*.jks
