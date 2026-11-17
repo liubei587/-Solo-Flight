@@ -4,6 +4,7 @@
 ![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-7F52FF)
 ![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)
 ![Local-first](https://img.shields.io/badge/Data-Local--only-critical)
+[![Release](https://img.shields.io/github/v/release/liubei587/-Solo-Flight?label=release)](https://github.com/liubei587/-Solo-Flight/releases/latest)
 
 > 纯本地记录并统计某种「独自起飞」的小习惯。A local-first tracker for a certain solo habit — no cloud, no accounts, just your own rhythm.
 
@@ -13,6 +14,16 @@
 FeiLeMa ("Did You Fly?") is a tiny Android app for logging and reflecting on a certain private solo habit — when it happened, how often, and what your rhythm looks like. Local-first by design: no network permission, no accounts, no analytics.
 
 > 名字是个心照不宣的暗号，点到为止。
+
+## 下载
+
+[![Download APK](https://img.shields.io/badge/Download-APK-2563EB)](https://github.com/liubei587/-Solo-Flight/releases/latest)
+
+前往 [Releases](https://github.com/liubei587/-Solo-Flight/releases) 下载最新版 APK（当前 v0.6.9）。
+
+- 首次安装：直接安装 `feilema-0.6.9.apk` 即可
+- 如已安装旧签名版本：需先卸载（会清除本机数据，建议先在「设置」里导出 CSV/JSON 备份）
+- 校验：`feilema-0.6.9.apk.sha256` 内含 APK 的 SHA-256
 
 ## 功能特性
 
