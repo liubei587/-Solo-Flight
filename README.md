@@ -203,7 +203,8 @@ Release workflow 需要 `KEYSTORE_BASE64`、`KEYSTORE_STORE_PASSWORD`、`KEYSTOR
 - [CONTRIBUTING.md](CONTRIBUTING.md)：开发环境、代码约定、测试要求、提交规范；
 - [CHANGELOG.md](CHANGELOG.md)：各版本变更记录；
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：分层、数据模型、统计口径与扩展点；
-- [SECURITY.md](SECURITY.md)：安全问题请私下报告。
+- [SECURITY.md](SECURITY.md)：安全问题请私下报告；
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)：参与讨论前请先阅读。
 
 > 请勿在 issue 中粘贴密码、keystore、备份文件或任何真实记录。
 

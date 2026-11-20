@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题 / Security report
+    url: https://github.com/liubei587/-Solo-Flight/security/advisories/new
+    about: 请勿公开报告安全漏洞，使用私下报告渠道（见 SECURITY.md）。
+  - name: 使用问题 / 讨论 / Discussions
+    url: https://github.com/liubei587/-Solo-Flight/discussions
+    about: 不属于 bug 或功能建议的讨论，欢迎到 Discussions。
