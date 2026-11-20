@@ -78,6 +78,18 @@ app/src/main/java/com/feilema/app/
 - 提交信息与 PR 描述使用中文或英文均可，但需说清动机与行为变化。
 - PR 模板中列出的自检项请逐条确认；CI 未通过不会合并。
 
+## 依赖升级
+
+本项目的构建工具链版本互相强绑定：AGP、Kotlin、KSP、Compose Compiler、Gradle wrapper 必须一起升级。请按下面的清单人工验证，不要单独升级其中一个：
+
+1. 先升级 Gradle wrapper，再升级 AGP，最后升级 Kotlin / KSP / Compose Compiler（三者版本要匹配）；
+2. 同步检查 `compileSdk` / `targetSdk` / `build-tools` 是否需要跟随；
+3. 本地跑完整门禁：`./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease`；
+4. 如果改动涉及运行时行为，在 `CHANGELOG.md` 的 `Unreleased` 记录；
+5. 不要在依赖升级 PR 里混入业务改动。
+
+Dependabot 只自动维护 GitHub Actions 版本；Gradle 依赖的安全提示仍会由 GitHub security alerts 提醒。
+
 ## 报告问题
 
 - 使用 issue 模板（Bug 报告 / 功能建议），提供版本、设备、复现步骤。

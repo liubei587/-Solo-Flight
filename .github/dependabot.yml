@@ -1,39 +1,14 @@
+# Dependabot 配置
+#
+# 说明：本项目的 AGP / Kotlin / KSP / Compose 编译器 / Gradle wrapper 版本互相强绑定
+# （例如 Kotlin 1.9.25 就需要对应的 Compose Compiler 版本），自动升级会直接破坏构建。
+# 因此 Gradle 依赖采用「人工验证升级」策略：
+#   - 先在本地按 docs/RELEASING.md 的检查项升级、跑测试与构建；
+#   - 确认后随版本发布一起提交。
+# GitHub 仍会通过 Dependabot security alerts 提示存在安全问题的依赖。
+# 本文件只自动维护 GitHub Actions（CI/Release workflow 用到的 action 版本）。
 version: 2
 updates:
-  - package-ecosystem: gradle
-    directory: "/"
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-    groups:
-      # 构建工具链单独一个 PR，且忽略 major 升级：AGP / Kotlin / KSP / Compose 编译器
-      # 需要一起升级并人工验证，不能让 Dependabot 直接换大版本。
-      gradle-toolchain:
-        patterns:
-          - "com.android.tools.build:gradle"
-          - "org.jetbrains.kotlin*"
-          - "com.google.devtools.ksp*"
-          - "androidx.compose.compiler*"
-      gradle-libraries:
-        patterns: ["*"]
-        exclude-patterns:
-          - "com.android.tools.build:gradle"
-          - "org.jetbrains.kotlin*"
-          - "com.google.devtools.ksp*"
-          - "androidx.compose.compiler*"
-    ignore:
-      - dependency-name: "com.android.tools.build:gradle"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "org.jetbrains.kotlin*"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "com.google.devtools.ksp*"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "androidx.compose.compiler*"
-        update-types: ["version-update:semver-major"]
-
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
@@ -44,7 +19,7 @@ updates:
       github-actions:
         patterns: ["*"]
     ignore:
-      # 大版本升级（例如 actions/* v5 → v6）先由维护者手动处理并观察 runner 兼容性。
+      # 大版本升级先由维护者手动处理并观察 runner 兼容性。
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     labels:
