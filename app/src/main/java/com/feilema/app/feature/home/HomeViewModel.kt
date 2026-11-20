@@ -9,9 +9,11 @@ import java.time.Clock
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -38,17 +40,43 @@ class HomeViewModel @Inject constructor(
     private val nextWeekStart: Instant =
         weekStartDate.plusWeeks(1).atStartOfDay(zone).toInstant()
 
+    /** 首页日历当前展示的月份；默认本月，可以往前翻。 */
+    private val calendarMonth = MutableStateFlow(YearMonth.now(clock))
+
     val uiState: StateFlow<HomeUiState> = combine(
+        repository.observeAll(),
         repository.observeCountBetween(todayStart, tomorrowStart),
         repository.observeCountBetween(weekStart, nextWeekStart),
-        repository.observeRecent(limit = 3),
-    ) { todayCount, weekCount, recent ->
-        HomeUiState(todayCount = todayCount, weekCount = weekCount, recentEvents = recent)
+        calendarMonth,
+    ) { events, todayCount, weekCount, month ->
+        val monthCounts = events.asSequence()
+            .map { it.occurredAt.atZone(zone) }
+            .filter { YearMonth.from(it) == month }
+            .groupingBy { it.toLocalDate() }
+            .eachCount()
+        HomeUiState(
+            todayCount = todayCount,
+            weekCount = weekCount,
+            recentEvents = events.take(3),
+            calendarMonth = month,
+            monthCounts = monthCounts,
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = HomeUiState(),
     )
+
+    fun previousMonth() {
+        calendarMonth.value = calendarMonth.value.minusMonths(1)
+    }
+
+    fun nextMonth() {
+        val next = calendarMonth.value.plusMonths(1)
+        if (!next.isAfter(YearMonth.now(clock))) {
+            calendarMonth.value = next
+        }
+    }
 
     fun record() {
         viewModelScope.launch {
