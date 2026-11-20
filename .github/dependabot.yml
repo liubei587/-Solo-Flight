@@ -6,11 +6,33 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
-    groups:
-      gradle-dependencies:
-        patterns: ["*"]
     labels:
       - dependencies
+    groups:
+      # 构建工具链单独一个 PR，且忽略 major 升级：AGP / Kotlin / KSP / Compose 编译器
+      # 需要一起升级并人工验证，不能让 Dependabot 直接换大版本。
+      gradle-toolchain:
+        patterns:
+          - "com.android.tools.build:gradle"
+          - "org.jetbrains.kotlin*"
+          - "com.google.devtools.ksp*"
+          - "androidx.compose.compiler*"
+      gradle-libraries:
+        patterns: ["*"]
+        exclude-patterns:
+          - "com.android.tools.build:gradle"
+          - "org.jetbrains.kotlin*"
+          - "com.google.devtools.ksp*"
+          - "androidx.compose.compiler*"
+    ignore:
+      - dependency-name: "com.android.tools.build:gradle"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.jetbrains.kotlin*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "com.google.devtools.ksp*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "androidx.compose.compiler*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -21,5 +43,9 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+    ignore:
+      # 大版本升级（例如 actions/* v5 → v6）先由维护者手动处理并观察 runner 兼容性。
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels:
       - dependencies
