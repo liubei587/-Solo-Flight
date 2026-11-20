@@ -23,8 +23,8 @@ android {
         applicationId = "com.feilema.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 19
-        versionName = "0.6.9"
+        versionCode = 23
+        versionName = "0.7.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

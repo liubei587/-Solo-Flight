@@ -19,43 +19,46 @@ FeiLeMa ("Did You Fly?") is a tiny Android app for logging and reflecting on a c
 
 [![Download APK](https://img.shields.io/badge/Download-APK-2563EB)](https://github.com/liubei587/-Solo-Flight/releases/latest)
 
-前往 [Releases](https://github.com/liubei587/-Solo-Flight/releases) 下载最新版 APK（当前 v0.6.9）。
+前往 [Releases](https://github.com/liubei587/-Solo-Flight/releases) 下载最新版 APK（当前开发版 v0.7.3）。
 
-- 首次安装：直接安装 `feilema-0.6.9.apk` 即可
+- 首次安装：安装对应版本的 `feilema-x.y.z.apk` 即可
 - 如已安装旧签名版本：需先卸载（会清除本机数据，建议先在「设置」里导出 CSV/JSON 备份）
-- 校验：`feilema-0.6.9.apk.sha256` 内含 APK 的 SHA-256
+- 校验：同目录的 `.sha256` 文件内含 APK 的 SHA-256
 
 ## 功能特性
 
 ### 记录
 - 首页一键记录，显示「本周已飞」和「今天 N 次」，支持撤销上一次
+- 首页日历：当月铺成日历，飞过的日子用主题色圈出来，右上角标注当日次数，可左右切换月份回看
 - 历史时间线按天分组：补录、修改发生时间、删除，空白日一眼可见
 - 每次记录都保存真实发生时间（`occurredAt`），补录不会污染历史统计
 
 ### 统计
 - 今日 / 本周 / 总次数、日均、活跃日均、连续天数、平均间隔、间隔中位数
-- 环比环形图、近 7 / 30 / 90 天或全部的趋势折线（含均值线）
-- 时段分布、周内分布，以及按「每周次数」统计的箱线图
+- 环比环形图、近 7 / 30 / 90 天或全部的趋势折线（含均值线，纵轴为次数、横轴为日期刻度）
+- 时段分布、周内分布（带次数纵轴刻度、单位「次」与时间/星期横轴标签，柱状图错峰入场），以及按「每周次数」统计的箱线图（固定回看半年，与图表范围解耦）
 - 图表入场与切换动效；图表时段与指标口径可以分别切换
 
 ### 自定义
-- 统计卡片编辑模式：长按进入，拖拽排序（实时落位预览、其他卡片避让、松手弹簧落位、拖到列表边缘自动滚动）
-- 卡片尺寸 1×1 / 2×1 / 1×2 / 2×2，滚轮选择；可删除与重新添加卡片，布局持久化
+- 统计卡片编辑模式：长按进入，拖拽排序（实时落位预览、其他卡片避让、松手弹簧落位、卡片碰到列表上下边缘才自动滚动）
+- 卡片尺寸 1×1 / 2×1 / 2×2，滚轮选择；可删除与重新添加卡片，布局持久化
 - 外观：跟随系统 / 浅色 / 深色；7 套预设主题色 + HSV 自定义取色；桌面图标跟随主题色
 - 自定义背景图，选择后可裁剪出想要的区域
 
 ### 其他
 - 每日提醒（AlarmManager + 通知，重启后自动恢复）
 - CSV / JSON 导出（系统文件选择器，写到用户自己选的位置）
+- 备份导入：选择本应用导出的 JSON / CSV 即可恢复，重复记录自动跳过（文件选择器支持“全部文件”，避免部分机型把 json/csv 视为未知类型而无法选中）
 - 桌面小组件：显示今日次数，点一下直接记录
 - 无网络权限、无账号、无统计埋点
 
 ### Features (English)
 - One-tap logging, weekly hero card, undo, and a day-grouped timeline with backfill / edit / delete
-- Stats: daily & active averages, streaks, average/median interval, change ring, trend line, hour-of-day and weekday distributions, weekly box plot
-- Fully editable stats dashboard: long-press to edit, drag to reorder with live preview, resize cards (1×1 / 2×1 / 1×2 / 2×2), add/remove cards, persisted layout
+- Home calendar: recorded days are circled in the theme color with the day's count in the corner, and you can page through months
+- Stats: daily & active averages, streaks, average/median interval, change ring, trend line with value/date axes, hour-of-day and weekday bar charts with axes and staggered animations, weekly box plot (fixed six-month window)
+- Fully editable stats dashboard: long-press to edit, drag to reorder with live preview, resize cards (1×1 / 2×1 / 2×2), add/remove cards, persisted layout
 - Appearance: light/dark/system, seven preset palettes plus a custom HSV color wheel, launcher icon follows the theme, custom background with cropping
-- Daily reminder, CSV/JSON export, Glance home-screen widget
+- Daily reminder, CSV/JSON export and import (duplicates skipped automatically), Glance home-screen widget
 - Local-first: no network permission, no accounts, no analytics
 
 ## 技术栈
@@ -148,7 +151,7 @@ keyPassword=你的密码
 
 ## 测试
 
-JVM 测试（不需要设备，39 个）：
+JVM 测试（不需要设备，49 个）：
 
 ```bash
 ./gradlew :app:testDebugUnitTest
@@ -157,10 +160,11 @@ JVM 测试（不需要设备，39 个）：
 
 覆盖范围：
 
-- 统计口径 12 个（固定 Clock 的日均、连续天数、间隔、趋势、时段/周内分布、按周箱线图、时间段切分、环比）
+- 统计口径 13 个（固定 Clock 的日均、连续天数、间隔、趋势、时段/周内分布、按周且限半年的箱线图、时间段切分、环比）
 - CSV / JSON 导出格式 7 个
+- 备份导入 8 个（JSON / CSV round-trip、引号换行备注、无效行与版本校验）
 - 提醒时间计算 4 个
-- 统计卡片网格位置与改尺寸补位 11 个
+- 统计卡片网格位置、改尺寸补位与拖动挤开 12 个
 - 背景裁剪几何 4 个
 - Robolectric 启动真实 `MainActivity` 的导航冒烟 1 个（Hilt + Room + Compose 全链路，验证打开不崩、四个 tab 可切换）
 
