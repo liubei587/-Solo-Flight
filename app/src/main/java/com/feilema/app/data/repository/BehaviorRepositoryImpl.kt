@@ -37,6 +37,32 @@ class BehaviorRepositoryImpl @Inject constructor(
             ),
         )
 
+    override suspend fun importEvents(events: List<BehaviorEvent>): Int {
+        if (events.isEmpty()) return 0
+        val existingKeys = dao.getAllOnce().mapTo(mutableSetOf()) { entity ->
+            Triple(entity.occurredAt / 1000, entity.createdAt / 1000, entity.note?.trim().orEmpty())
+        }
+        val entities = ArrayList<BehaviorEventEntity>(events.size)
+        events.forEach { event ->
+            val key = Triple(
+                event.occurredAt.toEpochMilli() / 1000,
+                event.createdAt.toEpochMilli() / 1000,
+                event.note?.trim().orEmpty(),
+            )
+            if (existingKeys.add(key)) {
+                entities += BehaviorEventEntity(
+                    occurredAt = event.occurredAt.toEpochMilli(),
+                    createdAt = event.createdAt.toEpochMilli(),
+                    note = event.note?.trim()?.ifBlank { null },
+                )
+            }
+        }
+        if (entities.isNotEmpty()) {
+            dao.insertAll(entities)
+        }
+        return entities.size
+    }
+
     override suspend fun updateEvent(id: Long, occurredAt: Instant, note: String?) {
         dao.update(id = id, occurredAt = occurredAt.toEpochMilli(), note = note)
     }

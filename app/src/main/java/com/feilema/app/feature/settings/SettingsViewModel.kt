@@ -10,6 +10,9 @@ import com.feilema.app.domain.model.BehaviorEvent
 import com.feilema.app.domain.repository.BehaviorRepository
 import com.feilema.app.domain.repository.ReminderRepository
 import com.feilema.app.domain.usecase.export.EventExporter
+import com.feilema.app.domain.usecase.export.EventImportException
+import com.feilema.app.domain.usecase.export.EventImporter
+import com.feilema.app.feature.widget.WidgetRefresher
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Clock
 import java.time.Instant
@@ -22,13 +25,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    repository: BehaviorRepository,
+    private val repository: BehaviorRepository,
     private val reminderRepository: ReminderRepository,
     private val themePreferences: ThemePreferences,
     private val launcherIconController: LauncherIconController,
+    private val widgetRefresher: WidgetRefresher,
     private val clock: Clock,
 ) : ViewModel() {
 
@@ -87,6 +92,30 @@ class SettingsViewModel @Inject constructor(
         val settings = themePreferences.settings.value
         viewModelScope.launch(Dispatchers.Default) {
             runCatching { launcherIconController.apply(settings) }
+        }
+    }
+
+    fun importData(text: String) {
+        viewModelScope.launch {
+            try {
+                val data = withContext(Dispatchers.Default) {
+                    EventImporter.parse(text, clock.zone)
+                }
+                val imported = repository.importEvents(data.events)
+                runCatching { widgetRefresher.refresh() }
+                val skipped = data.events.size - imported
+                val summary = buildString {
+                    append("导入完成（").append(data.format).append("）：新增 ")
+                        .append(imported).append(" 条")
+                    if (skipped > 0) append("，跳过重复 ").append(skipped).append(" 条")
+                    if (data.invalid > 0) append("，无法识别 ").append(data.invalid).append(" 条")
+                }
+                postMessage(summary)
+            } catch (e: EventImportException) {
+                postMessage("导入失败：${e.message}")
+            } catch (e: Exception) {
+                postMessage("导入失败：${e.message ?: "无法解析文件"}")
+            }
         }
     }
 

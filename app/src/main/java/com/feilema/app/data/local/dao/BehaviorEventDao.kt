@@ -12,6 +12,13 @@ interface BehaviorEventDao {
     @Insert
     suspend fun insert(event: BehaviorEventEntity): Long
 
+    @Insert
+    suspend fun insertAll(events: List<BehaviorEventEntity>): List<Long>
+
+    /** 一次性读取全部事件，导入时用来做去重。 */
+    @Query("SELECT * FROM behavior_events ORDER BY occurredAt DESC, id DESC")
+    suspend fun getAllOnce(): List<BehaviorEventEntity>
+
     @Query("DELETE FROM behavior_events WHERE id = :id")
     suspend fun deleteById(id: Long)
 

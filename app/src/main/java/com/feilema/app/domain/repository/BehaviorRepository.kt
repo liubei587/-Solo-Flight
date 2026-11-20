@@ -18,6 +18,12 @@ interface BehaviorRepository {
 
     suspend fun record(occurredAt: Instant, note: String? = null): Long
 
+    /**
+     * 导入备份事件：按「发生时间 + 记录时间 + 备注（秒级）」去重，
+     * 返回真正写入数据库的条数。
+     */
+    suspend fun importEvents(events: List<BehaviorEvent>): Int
+
     suspend fun updateEvent(id: Long, occurredAt: Instant, note: String?)
 
     suspend fun deleteEvent(id: Long)

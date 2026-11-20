@@ -167,6 +167,21 @@ fun SettingsRoute(viewModel: SettingsViewModel = hiltViewModel()) {
         }
     }
 
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val text = runCatching { readText(context, uri) }.getOrNull()
+                if (text != null) {
+                    viewModel.importData(text)
+                } else {
+                    viewModel.postMessage("读取文件失败，请换一个文件试试")
+                }
+            }
+        }
+    }
+
     LaunchedEffect(uiState.message) {
         val message = uiState.message ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
@@ -262,6 +277,19 @@ fun SettingsRoute(viewModel: SettingsViewModel = hiltViewModel()) {
                             modifier = Modifier.weight(1f),
                         ) { Text("导出 JSON") }
                     }
+                    OutlinedButton(
+                        onClick = {
+                            // 有些文件管理器/网盘会把 .json/.csv 报成未知 MIME，
+                            // 这里放开为所有文件，导入器会自行识别 JSON / CSV。
+                            importLauncher.launch(arrayOf("*/*"))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("导入备份（JSON / CSV）") }
+                    Text(
+                        "支持本应用导出的 JSON / CSV；如果文件选择器里看不到文件，请切换到“全部文件”。重复记录会自动跳过。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     if (uiState.totalCount == 0) {
                         Text(
                             "还没有记录，导出文件会是空表。",
@@ -547,4 +575,12 @@ private suspend fun writeText(context: Context, uri: Uri, content: String): Bool
                 stream.write(content.toByteArray(Charsets.UTF_8))
             } ?: error("无法打开目标文件")
         }.isSuccess
+    }
+
+private suspend fun readText(context: Context, uri: Uri): String =
+    withContext(Dispatchers.IO) {
+        val text = context.contentResolver.openInputStream(uri)?.use { stream ->
+            stream.bufferedReader(Charsets.UTF_8).readText()
+        } ?: error("无法打开文件")
+        text.trimStart('\uFEFF')
     }
