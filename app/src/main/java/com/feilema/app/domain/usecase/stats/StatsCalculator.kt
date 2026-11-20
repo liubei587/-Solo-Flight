@@ -18,6 +18,9 @@ import kotlin.math.roundToLong
 object StatsCalculator {
 
     private const val TREND_DAYS = 30L
+
+    /** 箱线图最多回看半年，避免「全部」范围把几年前的节奏也混进来。 */
+    private const val BOX_PLOT_MAX_DAYS = 180L
     private val DAY_LABEL: DateTimeFormatter = DateTimeFormatter.ofPattern("M/d", Locale.CHINA)
 
     fun build(events: List<BehaviorEvent>, now: Instant, zone: ZoneId): StatsSummary {
@@ -96,7 +99,15 @@ object StatsCalculator {
                 hour = hourDistribution(chartEvents, zone),
                 weekday = weekdayDistribution(chartEvents, zone),
             ),
-            boxPlot = buildBoxPlot(weeklyCounts(chartCounts, chartWindowStart, today)),
+            // 箱线图独立于图表范围：固定回看最近半年（数据不足半年则从首条记录起），
+            // 每个点是一周的总次数，避免切换 7 天 / 30 天时样本只剩几周。
+            boxPlot = buildBoxPlot(
+                weeklyCounts(
+                    countsByDate = countsByDate,
+                    windowStart = maxOf(firstDate, today.minusDays(BOX_PLOT_MAX_DAYS - 1)),
+                    today = today,
+                ),
+            ),
             metrics = buildRangeMetrics(events, zone, metricRange, today, tomorrowStart, firstDate),
         )
     }

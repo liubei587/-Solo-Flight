@@ -7,6 +7,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -188,16 +189,17 @@ class StatsCalculatorTest {
         assertEquals(1, page.metrics.previousCount)
         assertEquals(4.0, page.metrics.changeRatio!!, 0.0001)
 
-        // 箱线图按“每周次数”统计：窗口覆盖 5 个自然周，值为 0,0,0,1,4
+        // 箱线图独立于图表范围，固定回看半年：从首条记录 10-01 起覆盖 7 个自然周，
+        // 值为 1,0,0,0,0,1,4
         val box = page.boxPlot
         requireNotNull(box)
-        assertEquals(5, box.sampleSize)
+        assertEquals(7, box.sampleSize)
         assertEquals(0.0, box.min, 0.0001)
         assertEquals(0.0, box.q1, 0.0001)
         assertEquals(0.0, box.median, 0.0001)
-        assertEquals(2.5, box.q3, 0.0001)
-        assertEquals(4.0, box.max, 0.0001)
-        assertEquals(emptyList<Double>(), box.outliers)
+        assertEquals(1.0, box.q3, 0.0001)
+        assertEquals(1.0, box.max, 0.0001)
+        assertEquals(listOf(4.0), box.outliers)
     }
 
     @Test
@@ -247,13 +249,13 @@ class StatsCalculatorTest {
         assertEquals(3.0 / 7.0, page.metrics.recordRate, 0.0001)
         // 11-08 → 11-11 3 天，11-11 → 11-13 2 天，平均 2.5 天
         assertEquals(Duration.ofHours(60), page.metrics.averageInterval)
-        // 近 7 天窗口覆盖两个自然周：11-02 那周 1 次，11-09 那周 2 次
+        // 箱线图独立于图表范围：从首条记录 11-06 起回看，覆盖两个自然周，各 2 次
         val box = page.boxPlot
         requireNotNull(box)
         assertEquals(2, box.sampleSize)
-        assertEquals(1.0, box.min, 0.0001)
+        assertEquals(2.0, box.min, 0.0001)
         assertEquals(2.0, box.max, 0.0001)
-        assertEquals(1.5, box.median, 0.0001)
+        assertEquals(2.0, box.median, 0.0001)
     }
 
     @Test
@@ -267,5 +269,21 @@ class StatsCalculatorTest {
         assertEquals(0, page.metrics.count)
         assertNull(page.boxPlot)
         assertNull(page.lastRecordAt)
+    }
+
+    @Test
+    fun `all range box plot covers at most half a year`() {
+        // 从 2025-01-06（周一）开始每周一次，直到 today 附近，跨度远超半年。
+        val events = generateSequence(LocalDate.of(2025, 1, 6)) { it.plusDays(7) }
+            .takeWhile { !it.isAfter(LocalDate.of(2026, 11, 13)) }
+            .map { date -> event("${date}T04:00:00Z") }
+            .toList()
+
+        val page = StatsCalculator.buildPage(events, now, zone, StatsRange.ALL, StatsRange.ALL)
+
+        val box = page.boxPlot
+        requireNotNull(box)
+        // 半年 ≈ 26 周（窗口两端各算一整周时最多 27 个点）。
+        assertTrue("箱线图样本应限制在半年以内，实际 ${box.sampleSize}", box.sampleSize in 26..27)
     }
 }

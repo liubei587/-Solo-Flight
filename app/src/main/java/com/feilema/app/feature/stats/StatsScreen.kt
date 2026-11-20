@@ -46,6 +46,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -56,6 +57,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -95,6 +99,11 @@ fun StatsScreen(
 ) {
     val page = uiState.page
     val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    var listTopPx by remember { mutableFloatStateOf(0f) }
+    var listHeightPx by remember { mutableFloatStateOf(0f) }
+    val viewportTop = with(density) { listTopPx.toDp() }
+    val viewportBottom = with(density) { (listTopPx + listHeightPx).toDp() }
 
     var editing by rememberSaveable { mutableStateOf(false) }
     var draft by remember { mutableStateOf(uiState.layout) }
@@ -124,7 +133,12 @@ fun StatsScreen(
     val layout = if (editing) draft else uiState.layout
 
     LazyColumn(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coordinates ->
+                listTopPx = coordinates.positionInWindow().y
+                listHeightPx = coordinates.size.height.toFloat()
+            },
         state = listState,
         contentPadding = PaddingValues(start = 20.dp, top = 24.dp, end = 20.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -168,6 +182,8 @@ fun StatsScreen(
                     editing = editing,
                     page = page,
                     scrollState = listState,
+                    viewportTop = viewportTop,
+                    viewportBottom = viewportBottom,
                     chartAnimationKey = uiState.chartRange,
                     onEnterEdit = ::startEditing,
                     onMove = { card, toIndex -> draft = draft.withDragged(card, toIndex) },

@@ -1,6 +1,7 @@
 package com.feilema.app.domain.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -8,211 +9,202 @@ import org.junit.Test
 
 class StatsGridPlacementTest {
 
-    private val defaultOrder = StatsCard.defaultOrder
+    private val smallOrder = listOf(
+        StatsCard.PERIOD_COUNT,
+        StatsCard.ACTIVE_DAYS,
+        StatsCard.MAX_DAY,
+        StatsCard.DAILY_AVERAGE,
+        StatsCard.LAST_RECORD,
+        StatsCard.BEST_HOUR,
+    )
 
-    private fun assertValidGrid(slots: Map<StatsCard, GridRect>, order: List<StatsCard>) {
-        assertEquals(order.size, slots.size)
-        val occupied = HashSet<Int>()
-        for (card in order) {
-            val rect = requireNotNull(slots[card]) { "missing slot for $card" }
-            assertTrue("$card outside grid: $rect", rect.fitsGrid())
-            for (r in rect.row until rect.row + rect.rows) {
-                for (c in rect.column until rect.column + rect.columns) {
-                    assertTrue("cell ($c,$r) overlapped by $card", occupied.add(c * 1000 + r))
-                }
+    private val smallSizeOf: (StatsCard) -> CardSize = { CardSize.SMALL }
+
+    private fun layoutWith(
+        order: List<StatsCard> = smallOrder,
+        positions: Map<StatsCard, GridRect> = emptyMap(),
+    ): StatsLayout = StatsLayout(order = order, positions = positions)
+
+    private fun gappedLayout(): StatsLayout = layoutWith(
+        order = listOf(StatsCard.PERIOD_COUNT, StatsCard.LAST_RECORD),
+        positions = mapOf(
+            StatsCard.PERIOD_COUNT to GridRect(0, 0, 1, 1),
+            StatsCard.LAST_RECORD to GridRect(0, 2, 1, 1),
+        ),
+    )
+
+    private fun assertValid(slots: Map<StatsCard, GridRect>) {
+        val rects = mutableListOf<GridRect>()
+        slots.forEach { (card, rect) ->
+            assertTrue("$card 应该能放进两列网格", rect.fitsGrid())
+            assertTrue("$card 列数至少 1", rect.columns >= 1)
+            assertTrue("$card 行数至少 1", rect.rows >= 1)
+            rects.forEach { other ->
+                assertFalse("$card 与已有卡片重叠", rect.intersects(other))
             }
+            rects += rect
         }
     }
 
-    private fun GridRect.rank(): Int = row * 10 + column
+    private fun GridRect.readingRank(): Int = row * STATS_GRID_COLUMNS + column
+
+    @Test
+    fun cardSizeNoLongerOffersTall() {
+        assertEquals(listOf("1×1", "2×1", "2×2"), CardSize.entries.map { it.label })
+        assertTrue(CardSize.entries.none { it.name == "TALL" })
+    }
 
     @Test
     fun defaultLayoutIsCompactAndValid() {
-        val slots = computeGridSlots(defaultOrder) { defaultCardSize(it) }
-        assertValidGrid(slots, defaultOrder)
-        // 默认排布从原点开始，不留顶部空格。
-        assertTrue(slots.values.any { it.row == 0 && it.column == 0 })
+        val layout = StatsLayout()
+        val slots = computeGridSlots(layout.order) { layout.sizeOf(it) }
+        assertValid(slots)
+        assertEquals(GridRect(0, 0, 2, 2), slots[StatsCard.TREND])
+        assertEquals(GridRect(0, 2, 2, 1), slots[StatsCard.HOUR_DISTRIBUTION])
+        assertEquals(GridRect(0, 3, 2, 1), slots[StatsCard.WEEKDAY_DISTRIBUTION])
+        assertEquals(GridRect(0, 4, 2, 2), slots[StatsCard.BOX_PLOT])
     }
 
     @Test
     fun resizeKeepsAtLeastOneCellOverlap() {
-        val layout = StatsLayout()
-        val previous = computeGridSlots(layout.order) { layout.sizeOf(it) }
-        val resized = StatsCard.HOUR_DISTRIBUTION
-        val old = requireNotNull(previous[resized])
-        val newSlots = placeAfterResize(
+        val previous = computeGridSlots(StatsCard.defaultOrder) { defaultCardSize(it) }
+        val resized = placeAfterResize(
             previous = previous,
-            order = layout.order,
-            resized = resized,
+            order = StatsCard.defaultOrder,
+            resized = StatsCard.HOUR_DISTRIBUTION,
             newSize = CardSize.LARGE,
-            sizeOf = { layout.sizeOf(it) },
+            sizeOf = { defaultCardSize(it) },
         )
-        val updated = requireNotNull(newSlots[resized])
-        assertTrue("resized card must overlap old rect: old=$old new=$updated", updated.intersects(old))
-        assertValidGrid(newSlots, layout.order)
-    }
-
-    @Test
-    fun shrinkingPullsFollowingCardsUp() {
-        val layout = StatsLayout()
-        val previous = computeGridSlots(layout.order) { layout.sizeOf(it) }
-        val resized = StatsCard.TREND
-        val following = StatsCard.HOUR_DISTRIBUTION
-        val oldFollowing = requireNotNull(previous[following])
-        val newSlots = placeAfterResize(
-            previous = previous,
-            order = layout.order,
-            resized = resized,
-            newSize = CardSize.SMALL,
-            sizeOf = { layout.sizeOf(it) },
-        )
-        assertValidGrid(newSlots, layout.order)
-        val newFollowing = requireNotNull(newSlots[following])
+        assertValid(resized)
+        val oldRect = previous.getValue(StatsCard.HOUR_DISTRIBUTION)
         assertTrue(
-            "following card should move up into freed space: old=$oldFollowing new=$newFollowing",
-            newFollowing.rank() < oldFollowing.rank(),
+            "放大后应与旧位置至少重叠一格",
+            resized.getValue(StatsCard.HOUR_DISTRIBUTION).intersects(oldRect),
         )
     }
 
     @Test
-    fun followingCardsFillGapsInOrder() {
-        val order = listOf(StatsCard.PERIOD_COUNT, StatsCard.ACTIVE_DAYS, StatsCard.MAX_DAY)
-        val previous = linkedMapOf(
-            StatsCard.PERIOD_COUNT to GridRect(0, 0, 1, 1),
-            StatsCard.ACTIVE_DAYS to GridRect(0, 1, 1, 1),
-            StatsCard.MAX_DAY to GridRect(1, 1, 1, 1),
-        )
-        val slots = placeAfterResize(
+    fun resizePushesDisplacedCardForward() {
+        val previous = computeGridSlots(smallOrder, smallSizeOf)
+        val resized = placeAfterResize(
             previous = previous,
-            order = order,
+            order = smallOrder,
             resized = StatsCard.PERIOD_COUNT,
-            newSize = CardSize.SMALL,
-            sizeOf = { CardSize.SMALL },
+            newSize = CardSize.WIDE,
+            sizeOf = smallSizeOf,
         )
-        assertValidGrid(slots, order)
-        // (1,0) 的空格会被后面的卡片顺次补上：B 上移到 (1,0)，C 上移到 (0,1)。
-        assertEquals(1, requireNotNull(slots[StatsCard.ACTIVE_DAYS]).column)
-        assertEquals(0, requireNotNull(slots[StatsCard.ACTIVE_DAYS]).row)
-        assertEquals(0, requireNotNull(slots[StatsCard.MAX_DAY]).column)
-        assertEquals(1, requireNotNull(slots[StatsCard.MAX_DAY]).row)
-        // 顺序保持不变。
+        assertValid(resized)
+        assertEquals(GridRect(0, 0, 2, 1), resized[StatsCard.PERIOD_COUNT])
         assertTrue(
-            requireNotNull(slots[StatsCard.ACTIVE_DAYS]).rank() < requireNotNull(slots[StatsCard.MAX_DAY]).rank(),
+            "被挤开的卡片应往阅读方向后移",
+            resized.getValue(StatsCard.ACTIVE_DAYS).readingRank() >
+                previous.getValue(StatsCard.ACTIVE_DAYS).readingRank(),
         )
     }
 
     @Test
-    fun gapRemainsWhenFollowingCardCannotFit() {
-        val order = listOf(StatsCard.PERIOD_COUNT, StatsCard.HOUR_DISTRIBUTION)
-        val previous = linkedMapOf(
-            StatsCard.PERIOD_COUNT to GridRect(0, 0, 1, 1),
-            StatsCard.HOUR_DISTRIBUTION to GridRect(0, 1, 2, 1),
-        )
-        val slots = placeAfterResize(
+    fun cardsNotHitByResizeStayInPlace() {
+        val previous = computeGridSlots(smallOrder, smallSizeOf)
+        val resized = placeAfterResize(
             previous = previous,
-            order = order,
+            order = smallOrder,
             resized = StatsCard.PERIOD_COUNT,
-            newSize = CardSize.SMALL,
-            sizeOf = { if (it == StatsCard.HOUR_DISTRIBUTION) CardSize.WIDE else CardSize.SMALL },
+            newSize = CardSize.WIDE,
+            sizeOf = smallSizeOf,
         )
-        assertValidGrid(slots, order)
-        val occupied = slots.values.flatMap { rect ->
-            (rect.row until rect.row + rect.rows).flatMap { r ->
-                (rect.column until rect.column + rect.columns).map { c -> c to r }
+        assertValid(resized)
+        listOf(StatsCard.MAX_DAY, StatsCard.DAILY_AVERAGE, StatsCard.LAST_RECORD, StatsCard.BEST_HOUR)
+            .forEach { card ->
+                assertEquals("$card 没被挤到，应该原地不动", previous[card], resized[card])
             }
-        }.toSet()
-        // 宽卡放不进 (1,0) 这一格，允许它留空。
-        assertTrue((1 to 0) !in occupied)
     }
 
     @Test
-    fun displacedCardMovesDownWhenNoRoomAbove() {
-        val order = listOf(StatsCard.PERIOD_COUNT, StatsCard.ACTIVE_DAYS)
-        val previous = linkedMapOf(
-            StatsCard.PERIOD_COUNT to GridRect(0, 0, 1, 1),
-            StatsCard.ACTIVE_DAYS to GridRect(1, 0, 1, 1),
-        )
-        val slots = placeAfterResize(
+    fun shrinkingCardPullsFollowingCardsUp() {
+        val previous = computeGridSlots(StatsCard.defaultOrder) { defaultCardSize(it) }
+        val resized = placeAfterResize(
             previous = previous,
-            order = order,
-            resized = StatsCard.PERIOD_COUNT,
-            newSize = CardSize.LARGE,
-            sizeOf = { if (it == StatsCard.PERIOD_COUNT) CardSize.LARGE else CardSize.SMALL },
+            order = StatsCard.defaultOrder,
+            resized = StatsCard.TREND,
+            newSize = CardSize.SMALL,
+            sizeOf = { defaultCardSize(it) },
         )
-        assertValidGrid(slots, order)
-        assertEquals(2, requireNotNull(slots[StatsCard.ACTIVE_DAYS]).row)
-        assertEquals(0, requireNotNull(slots[StatsCard.ACTIVE_DAYS]).column)
-    }
-
-    @Test
-    fun resolveSlotsUsesSavedPositionsWhenValid() {
-        val order = listOf(StatsCard.PERIOD_COUNT, StatsCard.ACTIVE_DAYS)
-        val layout = StatsLayout(
-            order = order,
-            positions = mapOf(
-                StatsCard.PERIOD_COUNT to GridRect(1, 0, 0, 0),
-                StatsCard.ACTIVE_DAYS to GridRect(0, 3, 0, 0),
-            ),
-        )
-        val slots = layout.resolveSlots()
-        assertNotNull(slots)
-        assertEquals(1, slots!![StatsCard.PERIOD_COUNT]?.column)
-        assertEquals(3, slots[StatsCard.ACTIVE_DAYS]?.row)
-    }
-
-    @Test
-    fun resolveSlotsReturnsNullOnOverlap() {
-        val order = listOf(StatsCard.PERIOD_COUNT, StatsCard.ACTIVE_DAYS)
-        val layout = StatsLayout(
-            order = order,
-            positions = mapOf(
-                StatsCard.PERIOD_COUNT to GridRect(0, 0, 0, 0),
-                StatsCard.ACTIVE_DAYS to GridRect(0, 0, 0, 0),
-            ),
-        )
-        assertNull(layout.resolveSlots())
-    }
-
-    private fun gappedLayout(): StatsLayout {
-        val order = listOf(StatsCard.PERIOD_COUNT, StatsCard.LAST_RECORD)
-        return StatsLayout(
-            order = order,
-            positions = mapOf(
-                StatsCard.PERIOD_COUNT to GridRect(0, 0, 0, 0),
-                StatsCard.LAST_RECORD to GridRect(0, 2, 0, 0),
-            ),
+        assertValid(resized)
+        val oldRank = previous.getValue(StatsCard.HOUR_DISTRIBUTION).readingRank()
+        assertTrue(
+            "缩小后后面的卡片应尽量顺次上移",
+            resized.getValue(StatsCard.HOUR_DISTRIBUTION).readingRank() < oldRank,
         )
     }
 
     @Test
     fun freeDropRectCanTargetEmptyCells() {
-        val layout = gappedLayout()
-        // (1,1) 是空出来的格子，可以把卡片拖到这里。
-        val rect = layout.freeDropRect(StatsCard.PERIOD_COUNT, 1, 1)
-        assertNotNull(rect)
-        assertEquals(1, rect!!.column)
-        assertEquals(1, rect.row)
-        // 已有卡片的位置不能作为自由落点。
-        assertNull(layout.freeDropRect(StatsCard.PERIOD_COUNT, 0, 2))
+        val gapped = gappedLayout()
+        assertNotNull(gapped.freeDropRect(StatsCard.PERIOD_COUNT, column = 1, row = 1))
+        assertNull(gapped.freeDropRect(StatsCard.PERIOD_COUNT, column = 0, row = 2))
+        val clamped = gapped.freeDropRect(StatsCard.PERIOD_COUNT, column = 9, row = 3)
+        assertNotNull(clamped)
+        assertEquals(1, clamped!!.column)
     }
 
     @Test
     fun withCardPositionMovesOnlyDraggedCard() {
-        val layout = gappedLayout()
-        val moved = layout.withCardPosition(StatsCard.PERIOD_COUNT, GridRect(1, 1, 1, 1))
-        val slots = requireNotNull(moved.resolveSlots())
-        assertEquals(1, requireNotNull(slots[StatsCard.PERIOD_COUNT]).column)
-        assertEquals(1, requireNotNull(slots[StatsCard.PERIOD_COUNT]).row)
-        // 其他卡片保持原位，原来的格子空出来。
-        assertEquals(0, requireNotNull(slots[StatsCard.LAST_RECORD]).column)
-        assertEquals(2, requireNotNull(slots[StatsCard.LAST_RECORD]).row)
-        assertTrue(slots.values.none { it.row == 0 && it.column == 0 })
+        val gapped = gappedLayout()
+        val moved = gapped.withCardPosition(StatsCard.PERIOD_COUNT, GridRect(1, 1, 1, 1))
+        val resolved = moved.resolveSlots()
+        assertNotNull(resolved)
+        val slots = resolved!!
+        assertEquals(GridRect(1, 1, 1, 1), slots[StatsCard.PERIOD_COUNT])
+        assertEquals(GridRect(0, 2, 1, 1), slots[StatsCard.LAST_RECORD])
     }
 
     @Test
     fun withCardPositionRejectsOverlap() {
-        val layout = gappedLayout()
-        val result = layout.withCardPosition(StatsCard.LAST_RECORD, GridRect(0, 0, 1, 1))
-        assertEquals(layout.positions, result.positions)
+        val gapped = gappedLayout()
+        val moved = gapped.withCardPosition(StatsCard.PERIOD_COUNT, GridRect(0, 2, 1, 1))
+        val resolved = moved.resolveSlots()
+        assertNotNull(resolved)
+        val slots = resolved!!
+        assertEquals(GridRect(0, 0, 1, 1), slots[StatsCard.PERIOD_COUNT])
+    }
+
+    @Test
+    fun withDraggedPushesTargetCardsForward() {
+        val layout = layoutWith()
+        val moved = layout.withDragged(StatsCard.PERIOD_COUNT, toIndex = 1)
+        val resolved = moved.resolveSlots()
+        assertNotNull(resolved)
+        val slots = resolved!!
+        assertValid(slots)
+        assertEquals("被拖卡片应占据目标卡片的位置", 1, slots.getValue(StatsCard.PERIOD_COUNT).column)
+        assertEquals(0, slots.getValue(StatsCard.PERIOD_COUNT).row)
+        assertTrue("目标卡片被往后挤", slots.getValue(StatsCard.ACTIVE_DAYS).readingRank() > 1)
+    }
+
+    @Test
+    fun withDraggedKeepsOthersInPlaceAndLeavesGap() {
+        val layout = layoutWith()
+        val moved = layout.withDragged(StatsCard.PERIOD_COUNT, toIndex = 1)
+        val resolved = moved.resolveSlots()
+        assertNotNull(resolved)
+        val slots = resolved!!
+        assertEquals(GridRect(0, 1, 1, 1), slots[StatsCard.MAX_DAY])
+        assertTrue(
+            "原来被拖卡片的位置应该空出来",
+            slots.values.none { GridRect(0, 0, 1, 1).intersects(it) },
+        )
+    }
+
+    @Test
+    fun draggedCardKeepsItsOwnSize() {
+        val layout = StatsLayout()
+        val moved = layout.withDragged(StatsCard.BOX_PLOT, toIndex = 0)
+        val resolved = moved.resolveSlots()
+        assertNotNull(resolved)
+        val slots = resolved!!
+        assertValid(slots)
+        val box = slots.getValue(StatsCard.BOX_PLOT)
+        assertEquals(2, box.columns)
+        assertEquals(2, box.rows)
     }
 }

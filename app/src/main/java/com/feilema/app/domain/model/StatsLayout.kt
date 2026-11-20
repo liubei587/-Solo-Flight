@@ -6,7 +6,6 @@ package com.feilema.app.domain.model
 enum class CardSize(val label: String, val columns: Int, val rows: Int) {
     SMALL("1×1", 1, 1),
     WIDE("2×1", 2, 1),
-    TALL("1×2", 1, 2),
     LARGE("2×2", 2, 2),
 }
 

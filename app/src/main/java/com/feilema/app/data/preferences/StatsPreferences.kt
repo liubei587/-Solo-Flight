@@ -107,7 +107,12 @@ class StatsPreferences @Inject constructor(@ApplicationContext context: Context)
             val parts = item.split(":")
             if (parts.size != 2) return@mapNotNull null
             val card = StatsCard.entries.firstOrNull { it.name == parts[0] } ?: return@mapNotNull null
-            val size = CardSize.entries.firstOrNull { it.name == parts[1] } ?: return@mapNotNull null
+            // v0.6.x 还有 1×2 的「高卡片」，已删除该尺寸，读到旧值时升级成 2×2。
+            val size = if (parts[1] == "TALL") {
+                CardSize.LARGE
+            } else {
+                CardSize.entries.firstOrNull { it.name == parts[1] } ?: return@mapNotNull null
+            }
             card to size
         }.toMap()
     }

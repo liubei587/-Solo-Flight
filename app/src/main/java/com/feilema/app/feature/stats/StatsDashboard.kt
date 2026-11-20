@@ -84,17 +84,19 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import com.feilema.app.core.ui.components.RollingNumber
@@ -139,12 +141,12 @@ private val LocalChartAnimationKey = compositionLocalOf<Any?> { null }
 @Composable
 private fun rememberChartProgress(): Float {
     val animationKey = LocalChartAnimationKey.current
-    val progress = remember { Animatable(0f) }
-    LaunchedEffect(animationKey) {
-        progress.snapTo(0f)
+    // 按 key 重建 Animatable：切换范围时新实例从 0 开始，不会先闪一帧旧数据再回弹。
+    val progress = remember(animationKey) { Animatable(0f) }
+    LaunchedEffect(progress) {
         progress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+            animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
         )
     }
     return progress.value
@@ -164,6 +166,9 @@ internal fun StatsCardGrid(
     editing: Boolean,
     page: StatsPageData,
     scrollState: LazyListState,
+    /** 列表在窗口里的可见区域，用来判断卡片什么时候碰到上/下边缘。 */
+    viewportTop: Dp = 0.dp,
+    viewportBottom: Dp = 0.dp,
     /** 图表入场动画的触发 key：切统计范围、重新进入页面时传入新值即可重播动画。 */
     chartAnimationKey: Any? = null,
     onEnterEdit: () -> Unit,
@@ -175,7 +180,6 @@ internal fun StatsCardGrid(
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
-    val configuration = LocalConfiguration.current
     val pxPerDp = density.density
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -224,9 +228,10 @@ internal fun StatsCardGrid(
         )
         val gridHeight = if (maxRow == 0) 0.dp else (CELL_HEIGHT + GRID_GAP) * maxRow - GRID_GAP
 
-        val screenHeightPx = configuration.screenHeightDp * pxPerDp
-        val topEdgePx = 170f * pxPerDp
-        val bottomEdgePx = screenHeightPx - 210f * pxPerDp
+        // 卡片碰到列表上/下边缘才自动滚动；未测量到列表范围时退化为不自动滚动。
+        val measured = viewportBottom > viewportTop
+        val topEdgePx = if (measured) viewportTop.value * pxPerDp else 0f
+        val bottomEdgePx = if (measured) viewportBottom.value * pxPerDp else Float.MAX_VALUE
 
         fun slotCenter(slot: GridRect): Offset = Offset(
             x = ((cellWidth + GRID_GAP) * slot.column).value * pxPerDp +
@@ -277,9 +282,11 @@ internal fun StatsCardGrid(
             val cardTopPx = dragWindowPointer.y - grabOffset.y
             val cardHeightPx = CELL_HEIGHT.value * size.rows * pxPerDp +
                 GRID_GAP.value * (size.rows - 1) * pxPerDp
+            // 卡片真正碰到上/下边缘才开始滚动（留 2dp 余量，避免边界抖动）。
+            val edgeSlopPx = 2f * pxPerDp
             autoScrollDir = when {
-                cardTopPx < topEdgePx -> -1
-                cardTopPx + cardHeightPx > bottomEdgePx -> 1
+                cardTopPx <= topEdgePx + edgeSlopPx -> -1
+                cardTopPx + cardHeightPx >= bottomEdgePx - edgeSlopPx -> 1
                 else -> 0
             }
         }
@@ -654,20 +661,7 @@ private fun ColumnScope.ChartCardContent(
                 card = card,
                 page = page,
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                showLabels = true,
                 // 底部 ChartFootNote 已经显示平均/最高，这里不再重复。
-                showDetail = false,
-            )
-            ChartFootNote(card = card, page = page)
-        }
-        big -> {
-            CardTitle(card.label)
-            Spacer(modifier = Modifier.height(4.dp))
-            ChartBody(
-                card = card,
-                page = page,
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                showLabels = true,
                 showDetail = false,
             )
             ChartFootNote(card = card, page = page)
@@ -687,7 +681,6 @@ private fun ColumnScope.ChartCardContent(
                     card = card,
                     page = page,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
-                    showLabels = false,
                     showDetail = false,
                 )
             }
@@ -699,7 +692,6 @@ private fun ColumnScope.ChartCardContent(
                 card = card,
                 page = page,
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                showLabels = false,
                 showDetail = false,
             )
         }
@@ -711,7 +703,6 @@ private fun ChartBody(
     card: StatsCard,
     page: StatsPageData,
     modifier: Modifier,
-    showLabels: Boolean,
     showDetail: Boolean,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -725,14 +716,14 @@ private fun ChartBody(
         StatsCard.HOUR_DISTRIBUTION -> MiniBarChart(
             values = page.distribution.hour,
             color = scheme.primary,
-            labels = if (showLabels) hourLabels() else emptyList(),
+            labels = hourLabels(),
             labelEvery = 3,
             modifier = modifier,
         )
         StatsCard.WEEKDAY_DISTRIBUTION -> MiniBarChart(
             values = page.distribution.weekday,
             color = scheme.tertiary,
-            labels = if (showLabels) weekdayLabels() else emptyList(),
+            labels = weekdayLabels().map { "周$it" },
             modifier = modifier,
         )
         StatsCard.BOX_PLOT -> {
@@ -855,8 +846,7 @@ private fun ColumnScope.MetricCardContent(
 
     val scheme = MaterialTheme.colorScheme
     val valueStyle = when {
-        big && wide -> MaterialTheme.typography.displaySmall
-        big -> MaterialTheme.typography.headlineMedium
+        big -> MaterialTheme.typography.displaySmall
         wide -> MaterialTheme.typography.headlineSmall
         else -> MaterialTheme.typography.titleLarge
     }
@@ -890,34 +880,6 @@ private fun ColumnScope.MetricCardContent(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
-        big -> {
-            CardTitle(card.label)
-            Spacer(modifier = Modifier.weight(1f))
-            MetricValue(
-                card = card,
-                page = page,
-                style = valueStyle,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = caption,
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (detail.isNotEmpty()) {
-                Text(
-                    text = detail,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = scheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(modifier = Modifier.weight(1f))
         }
         wide -> {
             Row(
@@ -1127,7 +1089,7 @@ private fun metricDetail(card: StatsCard, page: StatsPageData): String {
 }
 
 private fun hourLabels(): List<String> =
-    (0 until 24).map { String.format(Locale.CHINA, "%02d", it) }
+    (0 until 24).map { String.format(Locale.CHINA, "%02d", it) + "时" }
 
 @Composable
 private fun CardTitle(text: String) {
@@ -1228,37 +1190,83 @@ private fun TrendChart(
 ) {
     val scheme = MaterialTheme.colorScheme
     val progress = rememberChartProgress()
+    val textMeasurer = rememberTextMeasurer()
+    val axisStyle = MaterialTheme.typography.labelSmall.copy(
+        color = scheme.onSurfaceVariant,
+        fontSize = 9.sp,
+    )
     val counts = points.map { it.count }
-    val maxCount = max(1, counts.maxOrNull() ?: 1)
+    val axisMax = max(1, counts.maxOrNull() ?: 1)
+    val midValue = axisMax / 2
+
     Box(modifier = modifier) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             if (counts.isEmpty()) return@Canvas
-            val chartTop = 4.dp.toPx()
-            val chartBottom = size.height - 2.dp.toPx()
-            val chartHeight = chartBottom - chartTop
-            val stepX = if (counts.size <= 1) 0f else size.width / (counts.size - 1).toFloat()
+            val leftGutter = 30.dp.toPx()
+            val bottomGutter = 15.dp.toPx()
+            val plotLeft = leftGutter
+            val plotRight = size.width - 6.dp.toPx()
+            val plotTop = 6.dp.toPx()
+            val plotBottom = size.height - bottomGutter
+            val plotWidth = (plotRight - plotLeft).coerceAtLeast(1f)
+            val plotHeight = (plotBottom - plotTop).coerceAtLeast(1f)
+            val stepX = if (counts.size <= 1) 0f else plotWidth / (counts.size - 1).toFloat()
 
+            // 纵坐标（次数）：0 / 中间值 / 最大值，配横向网格线
+            listOf(0, midValue, axisMax).distinct().forEach { value ->
+                val y = plotBottom - plotHeight * value / axisMax
+                drawLine(
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.16f),
+                    start = Offset(plotLeft, y),
+                    end = Offset(plotRight, y),
+                    strokeWidth = 1.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f)),
+                )
+                val layout = textMeasurer.measure(value.toString(), axisStyle)
+                drawText(
+                    textLayoutResult = layout,
+                    topLeft = Offset(
+                        plotLeft - layout.size.width - 4.dp.toPx(),
+                        y - layout.size.height / 2f,
+                    ),
+                )
+            }
+
+            // 坐标轴
+            drawLine(
+                color = scheme.onSurfaceVariant.copy(alpha = 0.35f),
+                start = Offset(plotLeft, plotTop),
+                end = Offset(plotLeft, plotBottom),
+                strokeWidth = 1.dp.toPx(),
+            )
+            drawLine(
+                color = scheme.onSurfaceVariant.copy(alpha = 0.35f),
+                start = Offset(plotLeft, plotBottom),
+                end = Offset(plotRight, plotBottom),
+                strokeWidth = 1.dp.toPx(),
+            )
+
+            // 折线与面积
             val linePath = Path()
             val areaPath = Path()
             counts.forEachIndexed { index, count ->
-                val x = stepX * index
-                val y = chartBottom - chartHeight * (count.toFloat() / maxCount) * progress
+                val x = plotLeft + stepX * index
+                val y = plotBottom - plotHeight * (count.toFloat() / axisMax) * progress
                 if (index == 0) {
                     linePath.moveTo(x, y)
-                    areaPath.moveTo(x, chartBottom)
+                    areaPath.moveTo(x, plotBottom)
                     areaPath.lineTo(x, y)
                 } else {
                     linePath.lineTo(x, y)
                     areaPath.lineTo(x, y)
                 }
             }
-            areaPath.lineTo(size.width, chartBottom)
+            areaPath.lineTo(plotLeft + stepX * (counts.size - 1), plotBottom)
             areaPath.close()
-
             drawPath(
                 path = areaPath,
                 brush = Brush.verticalGradient(
-                    listOf(scheme.primary.copy(alpha = 0.35f), scheme.primary.copy(alpha = 0.02f)),
+                    listOf(scheme.primary.copy(alpha = 0.32f), scheme.primary.copy(alpha = 0.02f)),
                 ),
             )
             drawPath(
@@ -1266,15 +1274,41 @@ private fun TrendChart(
                 color = scheme.primary,
                 style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
             )
+            if (counts.size <= 40) {
+                counts.forEachIndexed { index, count ->
+                    if (count > 0) {
+                        val x = plotLeft + stepX * index
+                        val y = plotBottom - plotHeight * (count.toFloat() / axisMax) * progress
+                        drawCircle(scheme.primary, radius = 2.dp.toPx(), center = Offset(x, y))
+                    }
+                }
+            }
 
+            // 平均值虚线
             if (average > 0) {
-                val avgY = chartBottom - chartHeight * (average.toFloat() / maxCount).coerceIn(0f, 1f)
+                val avgY = plotBottom - plotHeight * (average.toFloat() / axisMax).coerceIn(0f, 1f)
                 drawLine(
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.45f),
-                    start = Offset(0f, avgY),
-                    end = Offset(size.width, avgY),
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    start = Offset(plotLeft, avgY),
+                    end = Offset(plotRight, avgY),
                     strokeWidth = 1.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f)),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f)),
+                )
+            }
+
+            // 横坐标（日期）：首、1/3、2/3、尾，自动夹在画布内
+            val labelIndices = if (points.size <= 1) {
+                listOf(0)
+            } else {
+                listOf(0, points.size / 3, points.size * 2 / 3, points.size - 1).distinct()
+            }
+            labelIndices.forEach { index ->
+                val layout = textMeasurer.measure(points[index].label, axisStyle)
+                val rawX = plotLeft + stepX * index - layout.size.width / 2f
+                val x = rawX.coerceIn(0f, size.width - layout.size.width)
+                drawText(
+                    textLayoutResult = layout,
+                    topLeft = Offset(x, plotBottom + 2.dp.toPx()),
                 )
             }
         }
@@ -1299,39 +1333,114 @@ private fun MiniBarChart(
 ) {
     val scheme = MaterialTheme.colorScheme
     val progress = rememberChartProgress()
+    val textMeasurer = rememberTextMeasurer()
+    val axisStyle = MaterialTheme.typography.labelSmall.copy(
+        color = scheme.onSurfaceVariant,
+        fontSize = 9.sp,
+    )
     val maxValue = max(1, values.maxOrNull() ?: 1)
-    Column(modifier = modifier) {
-        Canvas(modifier = Modifier.fillMaxWidth().weight(1f)) {
-            if (values.isEmpty()) return@Canvas
-            val gap = 2.dp.toPx()
-            val slotWidth = size.width / values.size
-            val barWidth = max(1.5f, slotWidth - gap)
-            values.forEachIndexed { index, value ->
-                // 柱子从左到右依次长出来。
-                val grow = ((progress * values.size) - index).coerceIn(0f, 1f)
-                val height = (size.height - 2.dp.toPx()) * value / maxValue * grow
-                drawRoundRect(
-                    color = color.copy(alpha = (if (value == 0) 0.18f else 0.85f) * grow.coerceAtLeast(0.15f)),
-                    topLeft = Offset(index * slotWidth + gap / 2f, size.height - height),
-                    size = Size(barWidth, max(1.5f, height)),
-                    cornerRadius = CornerRadius(barWidth / 3f),
-                )
-            }
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        if (values.isEmpty()) return@Canvas
+        val leftGutter = 24.dp.toPx()
+        val bottomGutter = 18.dp.toPx()
+        val plotLeft = leftGutter
+        val plotRight = size.width - 2.dp.toPx()
+        val plotTop = 13.dp.toPx()
+        val plotBottom = (size.height - bottomGutter).coerceAtLeast(plotTop + 1f)
+        val plotWidth = (plotRight - plotLeft).coerceAtLeast(1f)
+        val plotHeight = (plotBottom - plotTop).coerceAtLeast(1f)
+
+        // 纵轴单位“次”
+        val unitLayout = textMeasurer.measure("次", axisStyle)
+        drawText(textLayoutResult = unitLayout, topLeft = Offset(0f, 0f))
+
+        // 纵轴（次数）刻度 + 横向网格
+        listOf(0, maxValue / 2, maxValue).distinct().forEach { value ->
+            val y = plotBottom - plotHeight * value / maxValue
+            drawLine(
+                color = scheme.onSurfaceVariant.copy(alpha = 0.14f),
+                start = Offset(plotLeft, y),
+                end = Offset(plotRight, y),
+                strokeWidth = 1.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 7f)),
+            )
+            val layout = textMeasurer.measure(value.toString(), axisStyle)
+            drawText(
+                textLayoutResult = layout,
+                topLeft = Offset(
+                    plotLeft - layout.size.width - 3.dp.toPx(),
+                    y - layout.size.height / 2f,
+                ),
+            )
         }
+
+        // 坐标轴：左纵轴 + 下横轴
+        drawLine(
+            color = scheme.onSurfaceVariant.copy(alpha = 0.35f),
+            start = Offset(plotLeft, plotTop),
+            end = Offset(plotLeft, plotBottom),
+            strokeWidth = 1.dp.toPx(),
+        )
+        drawLine(
+            color = scheme.onSurfaceVariant.copy(alpha = 0.35f),
+            start = Offset(plotLeft, plotBottom),
+            end = Offset(plotRight, plotBottom),
+            strokeWidth = 1.dp.toPx(),
+        )
+
+        val slotWidth = plotWidth / values.size
+        val barWidth = (slotWidth * 0.62f).coerceAtLeast(2.dp.toPx())
+        val baseline = 1.5.dp.toPx()
+
+        // 每根柱子在自己的 55% 时间段里缓动生长，按序号错峰 45%：
+        // 柱数少时足够慢，柱数多时形成波浪，零值也做一个轻微淡入。
+        val barCount = values.size.toFloat()
+        val span = 0.55f
+        val stagger = if (barCount <= 1f) 0f else 0.45f / (barCount - 1f)
+        values.forEachIndexed { index, value ->
+            val start = index * stagger
+            val raw = ((progress - start) / span).coerceIn(0f, 1f)
+            val grow = FastOutSlowInEasing.transform(raw)
+            val height = if (value <= 0) {
+                baseline
+            } else {
+                (plotHeight * value / maxValue * grow).coerceAtLeast(baseline)
+            }
+            val alpha = if (value <= 0) {
+                0.10f + 0.06f * grow
+            } else {
+                0.88f * grow.coerceAtLeast(0.10f)
+            }
+            drawRoundRect(
+                color = color.copy(alpha = alpha),
+                topLeft = Offset(
+                    plotLeft + index * slotWidth + (slotWidth - barWidth) / 2f,
+                    plotBottom - height,
+                ),
+                size = Size(barWidth, height),
+                cornerRadius = CornerRadius(barWidth / 3f),
+            )
+        }
+
+        // 横轴标签（时间/星期）：按可用宽度自适应抽稀，始终可见
         if (labels.isNotEmpty()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                labels.forEachIndexed { index, label ->
-                    if (index % labelEvery == 0) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = scheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
+            val maxLabelWidth = labels.maxOf {
+                textMeasurer.measure(it, axisStyle).size.width.toFloat()
+            }
+            var every = labelEvery.coerceAtLeast(1)
+            while (every < labels.size && every * slotWidth < maxLabelWidth + 6.dp.toPx()) {
+                every++
+            }
+            labels.forEachIndexed { index, label ->
+                if (index % every == 0) {
+                    val layout = textMeasurer.measure(label, axisStyle)
+                    val centerX = plotLeft + slotWidth * (index + 0.5f)
+                    val x = (centerX - layout.size.width / 2f)
+                        .coerceIn(0f, (size.width - layout.size.width).coerceAtLeast(0f))
+                    val y = (plotBottom + 3.dp.toPx())
+                        .coerceAtMost((size.height - layout.size.height).coerceAtLeast(0f))
+                    drawText(textLayoutResult = layout, topLeft = Offset(x, y))
                 }
             }
         }
@@ -1401,9 +1510,8 @@ private fun ChangeRing(
     val ringColor = if (changeRatio == null) scheme.onSurfaceVariant else if (up) scheme.primary else scheme.error
     val trackColor = scheme.onSurface.copy(alpha = 0.12f)
     val targetProgress = if (changeRatio == null) 0f else (abs(changeRatio).coerceAtMost(2.0) / 2.0).toFloat()
-    val progress = remember { Animatable(0f) }
-    LaunchedEffect(changeRatio) {
-        progress.snapTo(0f)
+    val progress = remember(changeRatio) { Animatable(0f) }
+    LaunchedEffect(progress) {
         progress.animateTo(
             targetValue = targetProgress,
             animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
@@ -1580,7 +1688,6 @@ internal fun WheelSizePickerDialog(
 private fun sizeHint(size: CardSize): String = when (size) {
     CardSize.SMALL -> "迷你"
     CardSize.WIDE -> "宽"
-    CardSize.TALL -> "高"
     CardSize.LARGE -> "大"
 }
 
