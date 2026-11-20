@@ -5,6 +5,7 @@
 ![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)
 ![Local-first](https://img.shields.io/badge/Data-Local--only-critical)
 [![Release](https://img.shields.io/github/v/release/liubei587/-Solo-Flight?label=release)](https://github.com/liubei587/-Solo-Flight/releases/latest)
+[![CI](https://github.com/liubei587/-Solo-Flight/actions/workflows/ci.yml/badge.svg)](https://github.com/liubei587/-Solo-Flight/actions/workflows/ci.yml)
 
 > 纯本地记录并统计某种「独自起飞」的小习惯。A local-first tracker for a certain solo habit — no cloud, no accounts, just your own rhythm.
 
@@ -185,6 +186,26 @@ powershell -ExecutionPolicy Bypass -File tools\smoke.ps1
 ```
 
 脚本会安装、启动、等几秒扫描 `AndroidRuntime` 崩溃日志并把截图存到 `build/smoke/`；需要 `adb`（在 `ANDROID_HOME` / `ANDROID_SDK_ROOT` 下，或用 `-Adb` 指定）。
+
+## CI / CD
+
+| Workflow | 触发 | 内容 |
+| --- | --- | --- |
+| [CI](.github/workflows/ci.yml) | push `main` / PR / 手动 | JDK 17 + Android SDK 34，跑 JVM 单测、lint、assembleDebug，上传 debug APK 与测试/lint 报告 |
+| [Release](.github/workflows/release.yml) | push `v*` tag / 手动（输入 tag） | 从仓库 Secrets 还原签名密钥，构建签名 APK，`apksigner` 校验签名，生成 `.sha256` 并创建 GitHub Release |
+
+Release workflow 需要 `KEYSTORE_BASE64`、`KEYSTORE_STORE_PASSWORD`、`KEYSTORE_KEY_ALIAS`、`KEYSTORE_KEY_PASSWORD` 四个 Secrets；配置与发布步骤见 [docs/RELEASING.md](docs/RELEASING.md)。依赖更新由 Dependabot 每周检查。
+
+## 参与贡献
+
+欢迎 issue 与 PR，提交前建议先看：
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)：开发环境、代码约定、测试要求、提交规范；
+- [CHANGELOG.md](CHANGELOG.md)：各版本变更记录；
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：分层、数据模型、统计口径与扩展点；
+- [SECURITY.md](SECURITY.md)：安全问题请私下报告。
+
+> 请勿在 issue 中粘贴密码、keystore、备份文件或任何真实记录。
 
 ## 隐私
 
