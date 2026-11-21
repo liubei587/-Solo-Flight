@@ -1,17 +1,18 @@
 package com.feilema.app.domain.model
 
-import kotlin.math.abs
-
 /**
  * 统计页两列网格的位置计算（纯计算，单位是“格”，UI 层负责换算成 dp）。
  *
- * 支持：
- * - [computeGridSlots]：按顺序紧凑排布（默认行为 / 增删卡片后的回退）；
- * - [placeAfterResize]：只改一张卡片的大小时，尽量留在原位附近，只把真正被挤到的卡片
- *   按顺序往后让位；缩小时让后面的卡片顺次上移补位，补不了的格子允许留空；
- * - [StatsLayout.withDragged]：拖动排序时被拖卡片占据目标位置，挡路的卡片往后挤，
- *   其余卡片原地不动（允许出现空格）；
- * - [StatsLayout.freeDropRect] / [StatsLayout.withCardPosition]：拖到空出来的格子上。
+ * 布局规则（本轮重做）：
+ * - 卡片顺序 = 阅读顺序（先行后列、行内从左到右），顺序由 [StatsLayout.order] 决定；
+ * - 拖动排序是“插入”而不是“交换”：把卡片插到目标卡片前面/后面，目标及其后面的卡片
+ *   按原顺序整体向后（向下）让位，不会把目标卡片拽到被拖卡片的旧位置；
+ * - 调整大小时被改卡片锚定原左上角，放不下的卡片沿自己的列向下让位，
+ *   这样下面的卡片会按原布局整体下移，而不是被塞到别的地方；
+ * - 只有缩小时才补位，而且只允许“紧挨着空位”的卡片向上补，空位和远处卡片之间不存在
+ *   相邻关系时保持留空，不会从下面很远的地方飞一张卡片上来；
+ * - 拖动到明确的空格时走 [StatsLayout.freeDropRect] / [StatsLayout.withCardPosition]，
+ *   只移动被拖卡片，其余卡片不动。
  */
 data class GridRect(
     val column: Int,
@@ -34,9 +35,6 @@ private fun GridRect.cells(): List<Int> {
     return result
 }
 
-/** 网格里的阅读顺序：行优先、同一行从左到右。 */
-private fun GridRect.rank(): Int = row * STATS_GRID_COLUMNS + column
-
 fun GridRect.intersects(other: GridRect): Boolean =
     column < other.column + other.columns &&
         other.column < column + columns &&
@@ -50,7 +48,7 @@ fun GridRect.fitsGrid(): Boolean =
         rows >= 1 &&
         column + columns <= STATS_GRID_COLUMNS
 
-/** 按顺序 + 尺寸做紧凑排布：从第 0 行开始，逐行从左到右找空位。 */
+/** 按顺序 + 尺寸做紧凑排布：从第 0 行开始，逐行找空位。 */
 fun computeGridSlots(
     order: List<StatsCard>,
     sizeOf: (StatsCard) -> CardSize,
@@ -58,8 +56,7 @@ fun computeGridSlots(
     val occupied = HashSet<Int>()
     val result = LinkedHashMap<StatsCard, GridRect>()
     for (card in order) {
-        val size = sizeOf(card)
-        val rect = firstFreeRect(occupied, size)
+        val rect = firstFreeRect(occupied, sizeOf(card))
         occupied.addAll(rect.cells())
         result[card] = rect
     }
@@ -84,27 +81,16 @@ fun StatsLayout.resolveSlots(): LinkedHashMap<StatsCard, GridRect>? {
     return result
 }
 
-/** 被调整大小的卡片尝试保留“至少重叠一格”时的候选位移，近的优先、左优先于右、上优先于下。 */
-private val RESIZE_OFFSETS = listOf(
-    0 to 0,
-    -1 to 0, 1 to 0, -2 to 0, 2 to 0,
-    0 to -1, -1 to -1, 1 to -1, -2 to -1, 2 to -1,
-    0 to -2, -1 to -2, 1 to -2,
-    0 to 1, -1 to 1, 1 to 1, -2 to 1, 2 to 1,
-    0 to 2, -1 to 2, 1 to 2,
-    0 to 3, 0 to -3,
-)
-
 /**
- * 调整 [resized] 卡片到 [newSize] 后的位置。
+ * 调整 [resized] 的大小后的完整位置表。
  *
- * 规则（按优先级）：
- * 1. 被调整卡片尽量留在原位附近，要求与旧矩形至少重叠一格；
- *    在满足条件的候选里优先选“不会挤到任何其他卡片”的位置，避免无谓移动。
- * 2. 没有被它挤到的卡片全部原地不动。
- * 3. 被挤到的卡片保持原有先后顺序，从被调整卡片的阅读位置往后找最近的空位，
- *    只向后让位，不会跳到别处；允许网格里留空。
- * 4. 卡片缩小时，排在它后面的卡片顺次向上补位；补不了的格子留空，不整体重排。
+ * 规则：
+ * 1. 被调整卡片锚定原左上角（列夹取到两列网格内），只向右/向下生长；
+ * 2. 按阅读顺序摆放其余卡片：原来的位置没被占就原地不动，被占则沿同一个列向下让位，
+ *    这样“下面的卡片按原布局整体下移”，不会改变相对顺序；
+ * 3. 卡片缩小时，被空出来的格子按“紧挨着”的规则向上补位：只有正好在空位正下方、
+ *    并且整行都能放下的卡片才会移动，移动后又空出来的格子可以继续带动更下面的卡片
+ *    （相邻链式补位），和空位不相邻的卡片不会移动。
  */
 fun placeAfterResize(
     previous: Map<StatsCard, GridRect>,
@@ -113,92 +99,52 @@ fun placeAfterResize(
     newSize: CardSize,
     sizeOf: (StatsCard) -> CardSize,
 ): LinkedHashMap<StatsCard, GridRect> {
-    val oldRect = previous[resized]
-    val resizedIndex = order.indexOf(resized)
-    if (resizedIndex < 0) return LinkedHashMap(previous)
-    val others = order.filter { it != resized }
+    if (resized !in order) return LinkedHashMap(previous)
 
-    fun oldRectOf(card: StatsCard): GridRect? {
-        val old = previous[card] ?: return null
-        val size = sizeOf(card)
-        return GridRect(old.column, old.row, size.columns, size.rows)
+    // previous 里的矩形带着调整前的尺寸（resolveSlots / computeGridSlots 生成），
+    // 不能再用 sizeOf(resized)（调用方可能已经把新尺寸写进去了）。
+    val oldRect = previous[resized] ?: return computeGridSlots(order) {
+        if (it == resized) newSize else sizeOf(it)
     }
 
-    // 没有旧位置（理论上不会发生）时退回紧凑排布。
-    if (oldRect == null) {
-        return computeGridSlots(order) { if (it == resized) newSize else sizeOf(it) }
-    }
+    val newColumns = newSize.columns.coerceIn(1, STATS_GRID_COLUMNS)
+    val baseRect = GridRect(
+        column = oldRect.column.coerceIn(0, (STATS_GRID_COLUMNS - newColumns).coerceAtLeast(0)),
+        row = oldRect.row.coerceAtLeast(0),
+        columns = newColumns,
+        rows = newSize.rows,
+    )
 
-    // 1. 选择被调整卡片的新位置：与旧位置重叠，且挤到的卡片越少越好。
-    var chosen: GridRect? = null
-    var chosenConflicts = Int.MAX_VALUE
-    for ((deltaColumn, deltaRow) in RESIZE_OFFSETS) {
-        val candidate = GridRect(
-            column = oldRect.column + deltaColumn,
-            row = oldRect.row + deltaRow,
-            columns = newSize.columns,
-            rows = newSize.rows,
-        )
-        if (!candidate.fitsGrid() || !candidate.intersects(oldRect)) continue
-        val conflicts = others.count { card -> oldRectOf(card)?.intersects(candidate) == true }
-        if (conflicts < chosenConflicts) {
-            chosen = candidate
-            chosenConflicts = conflicts
-            if (conflicts == 0) break
-        }
-    }
-    val resizedRect = chosen ?: run {
-        val occupied = others.mapNotNull { oldRectOf(it) }.flatMap { it.cells() }.toHashSet()
-        firstFreeRect(occupied, newSize)
-    }
-
-    // 2. 没被挤到的卡片原地不动。
     val placed = LinkedHashMap<StatsCard, GridRect>()
-    placed[resized] = resizedRect
-    val occupied = resizedRect.cells().toHashSet()
+    val occupied = HashSet<Int>()
     for (card in order) {
-        if (card == resized) continue
-        val rect = oldRectOf(card) ?: continue
-        if (rect.intersects(resizedRect)) continue
-        placed[card] = rect
-        occupied.addAll(rect.cells())
-    }
-
-    // 3. 被挤到的卡片按顺序往后让位（阅读顺序只增不减）。
-    var cursorRank = resizedRect.rank()
-    for (card in order) {
-        if (card == resized || card in placed) continue
-        val size = sizeOf(card)
-        val old = oldRectOf(card)
-        val minRank = maxOf(cursorRank, old?.rank() ?: cursorRank)
-        val rect = firstFreeRectFromRank(occupied, size, minRank)
-        placed[card] = rect
-        occupied.addAll(rect.cells())
-        cursorRank = maxOf(cursorRank, rect.rank())
-    }
-
-    // 4. 缩小时补位：只让后面的卡片向上/向前移动，顺序不变。
-    if (newSize.columns * newSize.rows < oldRect.columns * oldRect.rows) {
-        var lastRank = resizedRect.rank()
-        for (card in order.drop(resizedIndex + 1)) {
-            val current = placed[card] ?: continue
-            val size = sizeOf(card)
-            occupied.removeAll(current.cells().toHashSet())
-            val candidate = firstFreeRectBetween(
-                occupied = occupied,
-                size = size,
-                minRank = lastRank + 1,
-                maxRank = current.rank() - 1,
-            )
-            if (candidate != null) {
-                placed[card] = candidate
-                occupied.addAll(candidate.cells())
-                lastRank = candidate.rank()
-            } else {
-                occupied.addAll(current.cells())
-                lastRank = maxOf(lastRank, current.rank())
-            }
+        val size = if (card == resized) newSize else sizeOf(card)
+        var rect: GridRect = if (card == resized) {
+            baseRect
+        } else {
+            val old = previous[card] ?: continue
+            GridRect(old.column, old.row, size.columns, size.rows)
         }
+        rect = rect.copy(
+            column = rect.column.coerceIn(
+                0,
+                (STATS_GRID_COLUMNS - rect.columns).coerceAtLeast(0),
+            ),
+        )
+        if (!rect.fitsGrid()) continue
+        rect = pushDown(occupied, rect)
+        placed[card] = rect
+        occupied.addAll(rect.cells())
+    }
+
+    val freed = oldRect.cells().toSet() - baseRect.cells().toSet()
+    if (freed.isNotEmpty()) {
+        fillAdjacentGaps(
+            order = order,
+            placed = placed,
+            occupied = occupied,
+            freed = freed.toMutableSet(),
+        )
     }
 
     val result = LinkedHashMap<StatsCard, GridRect>()
@@ -206,63 +152,100 @@ fun placeAfterResize(
     return result
 }
 
+/** 沿同一列向下找到第一个放得下的行。 */
+private fun pushDown(occupied: Set<Int>, rect: GridRect): GridRect {
+    var candidate = rect
+    while (candidate.cells().any { it in occupied }) {
+        candidate = candidate.copy(row = candidate.row + 1)
+    }
+    return candidate
+}
+
 /**
- * 拖动排序：被拖卡片占据目标卡片的位置，挡路的卡片按顺序往后挤开；
- * 其他卡片原地不动，被拖卡片的旧位置留空（不自动补位）。
+ * 只补“紧挨着空位”的格子：卡片上方一整行必须都是空的，且这一行里至少有一格是刚从
+ * 被调整卡片那里空出来的；移动后卡片下方新空出的格子会加入 [freed]，从而允许相邻的
+ * 下一张卡片继续补位（相邻链式补位），不相邻的卡片不会移动。
+ */
+private fun fillAdjacentGaps(
+    order: List<StatsCard>,
+    placed: MutableMap<StatsCard, GridRect>,
+    occupied: MutableSet<Int>,
+    freed: MutableSet<Int>,
+) {
+    var changed = true
+    while (changed) {
+        changed = false
+        for (card in order) {
+            val rect = placed[card] ?: continue
+            if (rect.row <= 0) continue
+            val up = rect.copy(row = rect.row - 1)
+            if (!up.fitsGrid()) continue
+            val upCells = up.cells()
+            if (upCells.any { it in occupied }) continue
+            if (upCells.none { it in freed }) continue
+
+            val oldCells = rect.cells()
+            oldCells.forEach { occupied.remove(it) }
+            upCells.forEach { occupied.add(it) }
+            placed[card] = up
+
+            freed.removeAll(upCells)
+            freed.addAll(oldCells.filterNot { it in upCells })
+            changed = true
+        }
+    }
+}
+
+/**
+ * 拖动排序：按拖动方向把 [card] 插到目标卡片前/后，目标及后面的卡片依次向下让位，
+ * 保持原有相对顺序；被拖卡片的旧位置留空（不自动补位）。
  *
- * 与 [placeAfterResize] 不同：拖动不会触发向上补位，只有松手后布局才允许留空格。
+ * - 从下往上拖（旧顺序在目标之后）→ 插到目标卡片之前；
+ * - 从上往下拖（旧顺序在目标之前）→ 插到目标卡片之后。
  */
 fun StatsLayout.withDragged(card: StatsCard, toIndex: Int): StatsLayout {
     if (card !in order) return this
-    val slots = resolveSlots() ?: computeGridSlots(order) { sizeOf(it) }
-    if (slots.size != order.size) return withMoved(card, toIndex)
-    val anchorCard = order.getOrNull(toIndex)?.takeIf { it != card } ?: return this
-    val anchorRect = slots[anchorCard] ?: return this
+    val target = order.getOrNull(toIndex)?.takeIf { it != card } ?: return this
+    val current = resolveSlots() ?: computeGridSlots(order) { sizeOf(it) }
+    if (current.size != order.size) return withMoved(card, toIndex)
 
-    val nextOrder = order.toMutableList()
-    nextOrder.remove(card)
-    nextOrder.add(toIndex.coerceIn(0, nextOrder.size), card)
-
-    val oldRects = slots.mapValues { (c, rect) ->
-        val size = sizeOf(c)
-        GridRect(rect.column, rect.row, size.columns, size.rows)
-    }
-    val draggedSize = sizeOf(card)
-    val draggedRect = GridRect(
-        column = anchorRect.column.coerceIn(0, (STATS_GRID_COLUMNS - draggedSize.columns).coerceAtLeast(0)),
-        row = anchorRect.row.coerceAtLeast(0),
-        columns = draggedSize.columns,
-        rows = draggedSize.rows,
-    )
+    val from = order.indexOf(card)
+    val without = order.filter { it != card }.toMutableList()
+    val targetIndexInWithout = without.indexOf(target)
+    val insertIndex = if (from < toIndex) targetIndexInWithout + 1 else targetIndexInWithout
+    without.add(insertIndex.coerceIn(0, without.size), card)
+    val nextOrder = without
 
     val placed = LinkedHashMap<StatsCard, GridRect>()
-    placed[card] = draggedRect
-    val occupied = draggedRect.cells().toHashSet()
-
-    // 没被挤到的卡片全部原地不动。
-    for (other in order) {
-        if (other == card) continue
-        val rect = oldRects[other] ?: continue
-        if (rect.intersects(draggedRect)) continue
-        placed[other] = rect
+    val occupied = HashSet<Int>()
+    for (position in nextOrder) {
+        val size = sizeOf(position)
+        var rect: GridRect = if (position == card) {
+            val anchor = current[target] ?: current[card] ?: return this
+            GridRect(
+                column = anchor.column,
+                row = anchor.row.coerceAtLeast(0),
+                columns = size.columns,
+                rows = size.rows,
+            )
+        } else {
+            val old = current[position] ?: continue
+            GridRect(old.column, old.row, size.columns, size.rows)
+        }
+        rect = rect.copy(
+            column = rect.column.coerceIn(
+                0,
+                (STATS_GRID_COLUMNS - rect.columns).coerceAtLeast(0),
+            ),
+        )
+        if (!rect.fitsGrid()) continue
+        rect = pushDown(occupied, rect)
+        placed[position] = rect
         occupied.addAll(rect.cells())
-    }
-
-    // 被挤到的卡片按新顺序往后让位，不会跳到被拖卡片的旧位置。
-    var cursorRank = draggedRect.rank()
-    for (other in nextOrder) {
-        if (other == card || other in placed) continue
-        val size = sizeOf(other)
-        val old = oldRects[other]
-        val minRank = maxOf(cursorRank, old?.rank() ?: cursorRank)
-        val rect = firstFreeRectFromRank(occupied, size, minRank)
-        placed[other] = rect
-        occupied.addAll(rect.cells())
-        cursorRank = maxOf(cursorRank, rect.rank())
     }
 
     val positions = LinkedHashMap<StatsCard, GridRect>()
-    for (other in nextOrder) placed[other]?.let { positions[other] = it }
+    for (position in nextOrder) placed[position]?.let { positions[position] = it }
     return copy(order = nextOrder, positions = positions)
 }
 
@@ -271,8 +254,7 @@ private fun isFree(rect: GridRect, others: List<GridRect>): Boolean =
 
 /**
  * 自由落点：把 [card] 放到以 ([column], [row]) 为左上角的位置（尺寸不变），其他卡片位置不动。
- *
- * 用于把卡片拖到布局里空出来的格子；目标越界或和别的卡片重叠时返回 null（此时退回拖动挤位）。
+ * 目标越界或和别的卡片重叠时返回 null（此时退回拖动挤位逻辑）。
  */
 fun StatsLayout.freeDropRect(card: StatsCard, column: Int, row: Int): GridRect? {
     if (card !in order) return null
@@ -289,10 +271,7 @@ fun StatsLayout.freeDropRect(card: StatsCard, column: Int, row: Int): GridRect? 
     return rect.takeIf { isFree(it, others) }
 }
 
-/**
- * 把 [card] 直接放到 [rect]（其他卡片不动，允许留空格）。
- * 与 [freeDropRect] 配套；[rect] 非法或与别人重叠时原样返回。
- */
+/** 把 [card] 直接放到 [rect]（其他卡片不动，允许留空格）；[rect] 非法或与别人重叠时原样返回。 */
 fun StatsLayout.withCardPosition(card: StatsCard, rect: GridRect): StatsLayout {
     if (card !in order) return this
     val slots = resolveSlots() ?: computeGridSlots(order) { sizeOf(it) }
@@ -311,10 +290,7 @@ fun StatsLayout.withCardPosition(card: StatsCard, rect: GridRect): StatsLayout {
     return copy(positions = nextPositions)
 }
 
-private fun firstFreeRect(
-    occupied: Set<Int>,
-    size: CardSize,
-): GridRect {
+private fun firstFreeRect(occupied: Set<Int>, size: CardSize): GridRect {
     var row = 0
     while (true) {
         val maxColumn = STATS_GRID_COLUMNS - size.columns
@@ -324,69 +300,4 @@ private fun firstFreeRect(
         }
         row++
     }
-}
-
-/** 从阅读位置 [minRank] 开始按行优先顺序找第一个能放下的位置。 */
-private fun firstFreeRectFromRank(
-    occupied: Set<Int>,
-    size: CardSize,
-    minRank: Int,
-): GridRect {
-    var row = minRank / STATS_GRID_COLUMNS
-    while (true) {
-        val maxColumn = STATS_GRID_COLUMNS - size.columns
-        for (column in 0..maxColumn) {
-            val rect = GridRect(column, row, size.columns, size.rows)
-            if (rect.rank() < minRank) continue
-            if (rect.cells().none { it in occupied }) return rect
-        }
-        row++
-    }
-}
-
-/** 在阅读位置区间 [minRank]..[maxRank] 内找第一个空位；找不到返回 null。 */
-private fun firstFreeRectBetween(
-    occupied: Set<Int>,
-    size: CardSize,
-    minRank: Int,
-    maxRank: Int,
-): GridRect? {
-    if (maxRank < minRank) return null
-    val lastRow = maxRank / STATS_GRID_COLUMNS
-    for (row in 0..lastRow) {
-        val maxColumn = STATS_GRID_COLUMNS - size.columns
-        for (column in 0..maxColumn) {
-            val rect = GridRect(column, row, size.columns, size.rows)
-            val rank = rect.rank()
-            if (rank < minRank) continue
-            if (rank > maxRank) break
-            if (rect.cells().none { it in occupied }) return rect
-        }
-    }
-    return null
-}
-
-/** 离 [anchor] 最近的空位（按行列距离）；都放不下时退化为从左上角找第一个空位。 */
-private fun nearestFreeRect(
-    anchor: GridRect,
-    occupiedRects: List<GridRect>,
-    size: CardSize,
-): GridRect {
-    val occupied = occupiedRects.flatMap { it.cells() }.toHashSet()
-    val maxRow = (occupiedRects.maxOfOrNull { it.row + it.rows } ?: anchor.row) + size.rows + 1
-    var best: GridRect? = null
-    var bestDistance = Int.MAX_VALUE
-    for (row in 0..maxRow) {
-        val maxColumn = STATS_GRID_COLUMNS - size.columns
-        for (column in 0..maxColumn) {
-            val candidate = GridRect(column, row, size.columns, size.rows)
-            if (candidate.cells().any { it in occupied }) continue
-            val distance = abs(candidate.column - anchor.column) + abs(candidate.row - anchor.row)
-            if (distance < bestDistance) {
-                best = candidate
-                bestDistance = distance
-            }
-        }
-    }
-    return best ?: firstFreeRect(occupied, size)
 }

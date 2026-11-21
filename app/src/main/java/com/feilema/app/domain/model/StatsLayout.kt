@@ -57,8 +57,9 @@ fun defaultCardSize(card: StatsCard): CardSize = when (card) {
  * order 里只保留当前可见卡片；从 order 移除即“删除卡片”，
  * 所有卡片仍可从「增加卡片」重新加回来。
  *
- * positions 在“调整单张卡片大小”和“拖动排序”时保留：改大小时让被改卡片至少与旧位置重叠一格，
- * 拖动时只交换被拖卡片与目标卡片的位置、其他卡片原地不动，两种情况都允许网格里留空。
+ * positions 在“调整单张卡片大小”和“拖动排序”时保留：改大小时被改卡片锚定左上角，
+ * 被挤到的卡片沿原列下移、保持先后顺序；拖动是“插入”语义，目标及后面的卡片依次下移，
+ * 两种情况都允许网格里留空。缩小时只有紧挨着空位的卡片会补位（相邻链式）。
  * 增删卡片时会清空 positions，回到紧凑排布。
  */
 data class StatsLayout(
@@ -94,8 +95,8 @@ data class StatsLayout(
         if (card in order) this else copy(order = order + card, positions = emptyMap())
 
     /**
-     * 调整一张卡片的大小：新位置尽量与旧位置重叠（左优先于右、上优先于下），
-     * 其他卡片保持原位，放不下的卡片从上方找空位，允许网格留空。
+     * 调整一张卡片的大小：锚定原左上角；被挤到的卡片沿自己的列向下让位并保持先后顺序。
+     * 缩小时只有紧挨着空位的卡片会向上补位，允许网格里留空。
      */
     fun withSize(card: StatsCard, size: CardSize): StatsLayout {
         if (card !in order) return this

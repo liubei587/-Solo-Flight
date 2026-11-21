@@ -20,7 +20,7 @@ FeiLeMa ("Did You Fly?") is a tiny Android app for logging and reflecting on a c
 
 [![Download APK](https://img.shields.io/badge/Download-APK-2563EB)](https://github.com/liubei587/-Solo-Flight/releases/latest)
 
-前往 [Releases](https://github.com/liubei587/-Solo-Flight/releases) 下载最新版 APK（当前开发版 v0.7.3）。
+前往 [Releases](https://github.com/liubei587/-Solo-Flight/releases) 下载最新版 APK（当前开发版 v0.7.4）。
 
 - 首次安装：安装对应版本的 `feilema-x.y.z.apk` 即可
 - 如已安装旧签名版本：需先卸载（会清除本机数据，建议先在「设置」里导出 CSV/JSON 备份）
